@@ -90,7 +90,7 @@ static inline uint32_t cyw43_get_be32(const uint8_t *buf) {
 
 void cyw43_init(cyw43_t *self) {
     #ifdef CYW43_PIN_WL_HOST_WAKE
-    cyw43_hal_pin_config(CYW43_PIN_WL_HOST_WAKE, CYW43_HAL_PIN_MODE_INPUT, CYW43_HAL_PIN_PULL_NONE, 0);
+    cyw43_hal_pin_config(CYW43_PIN_WL_HOST_WAKE, CYW43_HAL_PIN_MODE_INPUT, CYW43_HAL_PIN_PULL_UP, 0);
     #endif
     cyw43_hal_pin_config(CYW43_PIN_WL_REG_ON, CYW43_HAL_PIN_MODE_OUTPUT, CYW43_HAL_PIN_PULL_NONE, 0);
     cyw43_hal_pin_low(CYW43_PIN_WL_REG_ON);
