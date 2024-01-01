@@ -85,7 +85,7 @@
 
 // Whether the download of resources should be verified.
 #ifndef CYW43_RESOURCE_VERIFY_DOWNLOAD
-#define CYW43_RESOURCE_VERIFY_DOWNLOAD (0)
+#define CYW43_RESOURCE_VERIFY_DOWNLOAD (1)
 #endif
 
 // Timing and timeout configuration.
