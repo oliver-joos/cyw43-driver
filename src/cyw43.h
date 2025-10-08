@@ -635,7 +635,7 @@ static inline uint32_t cyw43_pm_value(uint8_t pm_mode, uint16_t pm2_sleep_ret_ms
 /*!
  * \brief Default power management mode
  */
-#define CYW43_DEFAULT_PM (CYW43_PERFORMANCE_PM)
+#define CYW43_DEFAULT_PM (CYW43_NONE_PM)
 
 /*!
  * \brief No power management
@@ -645,12 +645,12 @@ static inline uint32_t cyw43_pm_value(uint8_t pm_mode, uint16_t pm2_sleep_ret_ms
 /*!
  * \brief Aggressive power management mode for optimal power usage at the cost of performance
  */
-#define CYW43_AGGRESSIVE_PM (cyw43_pm_value(CYW43_PM1_POWERSAVE_MODE, 10, 0, 0, 0))
+#define CYW43_AGGRESSIVE_PM (cyw43_pm_value(CYW43_NO_POWERSAVE_MODE, 10, 0, 0, 0))
 
 /*!
  * \brief Performance power management mode where more power is used to increase performance
  */
-#define CYW43_PERFORMANCE_PM (cyw43_pm_value(CYW43_PM2_POWERSAVE_MODE, 200, 1, 1, 10))
+#define CYW43_PERFORMANCE_PM (cyw43_pm_value(CYW43_NO_POWERSAVE_MODE, 200, 1, 1, 10))
 
 #if CYW43_ENABLE_BLUETOOTH
 
