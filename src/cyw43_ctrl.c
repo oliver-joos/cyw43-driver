@@ -84,7 +84,7 @@ static void cyw43_wifi_ap_set_up(cyw43_t *self, bool up);
 
 void cyw43_init(cyw43_t *self) {
     #if defined(CYW43_PIN_WL_HOST_WAKE)
-    cyw43_hal_pin_config(CYW43_PIN_WL_HOST_WAKE, CYW43_HAL_PIN_MODE_INPUT, CYW43_HAL_PIN_PULL_NONE, 0);
+    cyw43_hal_pin_config(CYW43_PIN_WL_HOST_WAKE, CYW43_HAL_PIN_MODE_INPUT, CYW43_HAL_PIN_PULL_UP, 0);
     #elif defined(CYW43_PIN_WL_IRQ)
     cyw43_hal_pin_config(CYW43_PIN_WL_IRQ, CYW43_HAL_PIN_MODE_INPUT, CYW43_HAL_PIN_PULL_NONE, 0);
     #endif
