@@ -148,6 +148,11 @@ typedef struct _cyw43_t {
     #if CYW43_ENABLE_BLUETOOTH
     bool bt_loaded;
     #endif
+
+    // Firmware file paths for runtime loading
+    const char *wifi_fw_path;
+    const char *nvram_path;
+    const char *bt_fw_path;
 } cyw43_t;
 
 extern cyw43_t cyw43_state;
