@@ -39,6 +39,11 @@
 
 #if CYW43_ENABLE_BLUETOOTH_OVER_UART
 
+#if MICROPY_PY_NETWORK_CYW43_FW_LOADER
+#include "extmod/vfs.h"
+#include "py/stream.h"
+#endif
+
 // This firmware file defines btfw_data and btfw_len.
 #include CYW43_BT_FIRMWARE_INCLUDE_FILE
 
@@ -248,7 +253,28 @@ int cyw43_bluetooth_controller_init(void) {
     #endif
 
     // Download the BT patch firmware.
-    cyw43_bluetooth_download_firmware(btfw_data, btfw_len);
+    #if MICROPY_PY_NETWORK_CYW43_FW_LOADER
+    if (cyw43_state.bt_fw_path != NULL) {
+        // Load BT firmware from filesystem
+        int err;
+        mp_obj_t bt_paths[1] = { mp_obj_new_str(cyw43_state.bt_fw_path, strlen(cyw43_state.bt_fw_path)) };
+        mp_obj_t bt_file = mp_vfs_open(1, bt_paths, (mp_map_t *)&mp_const_empty_map);
+        mp_off_t bt_len = mp_stream_seek(bt_file, 0, MP_SEEK_END, &err);
+        mp_stream_seek(bt_file, 0, MP_SEEK_SET, &err);
+        uint8_t *bt_fw_buf = m_new(uint8_t, (size_t)bt_len);
+        mp_uint_t actual = mp_stream_rw(bt_file, bt_fw_buf, (mp_uint_t)bt_len, &err, MP_STREAM_RW_READ);
+        mp_stream_close(bt_file);
+        if (actual != (mp_uint_t)bt_len || err != 0) {
+            m_del(uint8_t, bt_fw_buf, (size_t)bt_len);
+            return -MP_EIO;
+        }
+        cyw43_bluetooth_download_firmware(bt_fw_buf, (size_t)bt_len);
+        m_del(uint8_t, bt_fw_buf, (size_t)bt_len);
+    } else
+    #endif
+    {
+        cyw43_bluetooth_download_firmware(btfw_data, btfw_len);
+    }
 
     #ifdef CYW43_BT_UART_BAUDRATE_DOWNLOAD_FIRMWARE
     // Change UART baudrate back to default after patch firmware boots.

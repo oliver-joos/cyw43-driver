@@ -45,6 +45,13 @@
 
 #include CYW43_WIFI_NVRAM_INCLUDE_FILE
 
+#if MICROPY_PY_NETWORK_CYW43_FW_LOADER
+#include "cyw43.h"
+#include "extmod/vfs.h"
+#include "py/misc.h"
+#include "py/stream.h"
+#endif
+
 #if CYW43_USE_SPI
 #include "cyw43_spi.h"
 #include "cyw43_debug_pins.h"
@@ -76,6 +83,11 @@ extern bool enable_spi_packet_dumping;
 #define CYW43_WRITE_BYTES_PAD(len) ALIGN_UINT((len), 4)
 #else
 #define CYW43_WRITE_BYTES_PAD(len) ALIGN_UINT((len), 64)
+#endif
+
+#if MICROPY_PY_NETWORK_CYW43_FW_LOADER
+// Size of tail buffer for firmware validation
+#define CYW43_FW_VERIFY_TAIL_SIZE 800
 #endif
 
 // Configure the active level of the host interrupt pin.
@@ -1633,24 +1645,122 @@ alp_set:
     cyw43_write_backplane(self, SOCSRAM_BANKX_INDEX, 4, 0x3);
     cyw43_write_backplane(self, SOCSRAM_BANKX_PDA, 4, 0);
 
-    // Check that valid chipset firmware exists at the given source address.
-    int ret = cyw43_check_valid_chipset_firmware(self, CYW43_WIFI_FW_LEN, fw_data);
-    if (ret != 0) {
-        return ret;
-    }
+    #if MICROPY_PY_NETWORK_CYW43_FW_LOADER
+    cyw43_t *cyw_state = (cyw43_t *)self->cb_data;
 
-    // Download the main WiFi firmware blob to the 43xx device.
-    ret = cyw43_download_resource(self, 0x00000000, CYW43_WRITE_BYTES_PAD(CYW43_WIFI_FW_LEN), fw_data);
-    if (ret != 0) {
-        return ret;
-    }
+    if (cyw_state->wifi_fw_path != NULL) {
+        // Filesystem firmware loader with dynamic buffers
+        uint8_t *fw_verify_buf = m_new(uint8_t, CYW43_FW_VERIFY_TAIL_SIZE);
+        uint8_t *block_buf = m_new(uint8_t, CYW43_BUS_MAX_BLOCK_SIZE);
+        int err;
+        int ret;
 
-    // Download the NVRAM to the 43xx device.
-    size_t wifi_nvram_len = CYW43_WRITE_BYTES_PAD(sizeof(wifi_nvram_4343));
-    const uint8_t *wifi_nvram_data = wifi_nvram_4343;
-    cyw43_download_resource(self, CYW43_RAM_SIZE - 4 - wifi_nvram_len, wifi_nvram_len, (uintptr_t)wifi_nvram_data);
-    uint32_t sz = ((~(wifi_nvram_len / 4) & 0xffff) << 16) | (wifi_nvram_len / 4);
-    cyw43_write_backplane(self, CYW43_RAM_SIZE - 4, 4, sz);
+        // Open WiFi firmware file via VFS
+        mp_obj_t fw_paths[1] = { mp_obj_new_str(cyw_state->wifi_fw_path, strlen(cyw_state->wifi_fw_path)) };
+        mp_obj_t fw_file = mp_vfs_open(1, fw_paths, (mp_map_t *)&mp_const_empty_map);
+
+        // Get firmware file size
+        mp_off_t fw_len = mp_stream_seek(fw_file, 0, MP_SEEK_END, &err);
+        if (err != 0) {
+            mp_stream_close(fw_file);
+            m_del(uint8_t, block_buf, CYW43_BUS_MAX_BLOCK_SIZE);
+            m_del(uint8_t, fw_verify_buf, CYW43_FW_VERIFY_TAIL_SIZE);
+            return -MP_ENOENT;
+        }
+
+        // Read tail to prepare validation
+        mp_off_t tail_start = fw_len - CYW43_FW_VERIFY_TAIL_SIZE;
+        mp_stream_seek(fw_file, tail_start, MP_SEEK_SET, &err);
+        mp_uint_t actual = mp_stream_rw(fw_file, fw_verify_buf, CYW43_FW_VERIFY_TAIL_SIZE, &err, MP_STREAM_RW_READ);
+        if (actual != CYW43_FW_VERIFY_TAIL_SIZE || err != 0) {
+            mp_stream_close(fw_file);
+            m_del(uint8_t, block_buf, CYW43_BUS_MAX_BLOCK_SIZE);
+            m_del(uint8_t, fw_verify_buf, CYW43_FW_VERIFY_TAIL_SIZE);
+            return -MP_EIO;
+        }
+
+        // Validate firmware before downloading
+        ret = cyw43_check_valid_chipset_firmware(self, (size_t)fw_len, (uintptr_t)fw_verify_buf);
+        if (ret != 0) {
+            mp_stream_close(fw_file);
+            m_del(uint8_t, block_buf, CYW43_BUS_MAX_BLOCK_SIZE);
+            m_del(uint8_t, fw_verify_buf, CYW43_FW_VERIFY_TAIL_SIZE);
+            return ret;
+        }
+
+        // Download the main WiFi firmware in blocks to the 43xx device.
+        mp_stream_seek(fw_file, 0, MP_SEEK_SET, &err);
+        mp_uint_t total_read = 0;
+        while (total_read < (mp_uint_t)fw_len) {
+            mp_uint_t to_read = CYW43_BUS_MAX_BLOCK_SIZE;
+            if (total_read + to_read > (mp_uint_t)fw_len) {
+                to_read = (mp_uint_t)fw_len - total_read;
+            }
+            mp_uint_t actual = mp_stream_rw(fw_file, block_buf, to_read, &err, MP_STREAM_RW_READ);
+            if (actual != to_read || err != 0) {
+                mp_stream_close(fw_file);
+                m_del(uint8_t, block_buf, CYW43_BUS_MAX_BLOCK_SIZE);
+                m_del(uint8_t, fw_verify_buf, CYW43_FW_VERIFY_TAIL_SIZE);
+                return -MP_EIO;
+            }
+            ret = cyw43_download_resource(self, 0x00000000 + total_read, CYW43_WRITE_BYTES_PAD(to_read), (uintptr_t)block_buf);
+            if (ret != 0) {
+                mp_stream_close(fw_file);
+                m_del(uint8_t, block_buf, CYW43_BUS_MAX_BLOCK_SIZE);
+                m_del(uint8_t, fw_verify_buf, CYW43_FW_VERIFY_TAIL_SIZE);
+                return ret;
+            }
+            total_read += actual;
+        }
+
+        mp_stream_close(fw_file);
+
+        // Load NVRAM
+        size_t wifi_nvram_len;
+        const uint8_t *wifi_nvram_data;
+        if (cyw_state->nvram_path != NULL) {
+            mp_obj_t nvram_paths[1] = { mp_obj_new_str(cyw_state->nvram_path, strlen(cyw_state->nvram_path)) };
+            mp_obj_t nvram_file = mp_vfs_open(1, nvram_paths, (mp_map_t *)&mp_const_empty_map);
+            mp_off_t nvram_size = mp_stream_seek(nvram_file, 0, MP_SEEK_END, &err);
+            mp_stream_seek(nvram_file, 0, MP_SEEK_SET, &err);
+            wifi_nvram_len = CYW43_WRITE_BYTES_PAD(nvram_size);
+            wifi_nvram_data = block_buf;
+            mp_stream_rw(nvram_file, (void *)block_buf, (mp_uint_t)nvram_size, &err, MP_STREAM_RW_READ);
+            mp_stream_close(nvram_file);
+        } else {
+            // Fallback to embedded NVRAM
+            wifi_nvram_len = CYW43_WRITE_BYTES_PAD(sizeof(wifi_nvram_4343));
+            wifi_nvram_data = wifi_nvram_4343;
+        }
+        cyw43_download_resource(self, CYW43_RAM_SIZE - 4 - wifi_nvram_len, wifi_nvram_len, (uintptr_t)wifi_nvram_data);
+        uint32_t sz = ((~(wifi_nvram_len / 4) & 0xffff) << 16) | (wifi_nvram_len / 4);
+        cyw43_write_backplane(self, CYW43_RAM_SIZE - 4, 4, sz);
+
+        // Free buffers after NVRAM download
+        m_del(uint8_t, block_buf, CYW43_BUS_MAX_BLOCK_SIZE);
+        m_del(uint8_t, fw_verify_buf, CYW43_FW_VERIFY_TAIL_SIZE);
+    } else
+    #endif
+    {
+        // Check that valid chipset firmware exists at the given source address.
+        int ret = cyw43_check_valid_chipset_firmware(self, CYW43_WIFI_FW_LEN, fw_data);
+        if (ret != 0) {
+            return ret;
+        }
+
+        // Download the main WiFi firmware blob to the 43xx device.
+        ret = cyw43_download_resource(self, 0x00000000, CYW43_WRITE_BYTES_PAD(CYW43_WIFI_FW_LEN), fw_data);
+        if (ret != 0) {
+            return ret;
+        }
+
+        // Download the NVRAM to the 43xx device.
+        size_t wifi_nvram_len = CYW43_WRITE_BYTES_PAD(sizeof(wifi_nvram_4343));
+        const uint8_t *wifi_nvram_data = wifi_nvram_4343;
+        cyw43_download_resource(self, CYW43_RAM_SIZE - 4 - wifi_nvram_len, wifi_nvram_len, (uintptr_t)wifi_nvram_data);
+        uint32_t sz = ((~(wifi_nvram_len / 4) & 0xffff) << 16) | (wifi_nvram_len / 4);
+        cyw43_write_backplane(self, CYW43_RAM_SIZE - 4, 4, sz);
+    }
 
     reset_device_core(self, CORE_WLAN_ARM, false);
     device_core_is_up(self, CORE_WLAN_ARM);
@@ -1761,7 +1871,24 @@ f2_ready:
 
     // Load the CLM data; it sits just after main firmware
     CYW43_VDEBUG("cyw43_clm_load start\n");
-    cyw43_clm_load(self, (const uint8_t *)CYW43_CLM_ADDR, CYW43_CLM_LEN);
+    #if MICROPY_PY_NETWORK_CYW43_FW_LOADER
+    if (cyw_state->wifi_fw_path != NULL) {
+        int err = 0;
+        // Extract CLM from end of firmware file
+        mp_obj_t fw_paths[1] = { mp_obj_new_str(cyw_state->wifi_fw_path, strlen(cyw_state->wifi_fw_path)) };
+        mp_obj_t fw_file = mp_vfs_open(1, fw_paths, (mp_map_t *)&mp_const_empty_map);
+        mp_off_t fw_len = mp_stream_seek(fw_file, 0, MP_SEEK_END, &err);
+        mp_off_t clm_start = ALIGN_UINT(fw_len, 512);
+        size_t clm_len = (size_t)(fw_len - clm_start);
+        mp_stream_seek(fw_file, clm_start, MP_SEEK_SET, &err);
+        mp_stream_rw(fw_file, self->spid_buf, (mp_uint_t)clm_len, &err, MP_STREAM_RW_READ);
+        mp_stream_close(fw_file);
+        cyw43_clm_load(self, self->spid_buf, clm_len);
+    } else
+    #endif
+    {
+        cyw43_clm_load(self, (const uint8_t *)CYW43_CLM_ADDR, CYW43_CLM_LEN);
+    }
     CYW43_VDEBUG("cyw43_clm_load done\n");
 
     cyw43_write_iovar_u32(self, "bus:txglom", 0, WWD_STA_INTERFACE); // tx glomming off
