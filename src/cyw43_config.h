@@ -28,8 +28,9 @@
 #define CYW43_CLEAR_SDIO_INT (0)
 #endif
 
-#ifndef CYW43_INCLUDE_LEGACY_F1_OVERFLOW_WORKAROUND_VARIABLES
-#define CYW43_INCLUDE_LEGACY_F1_OVERFLOW_WORKAROUND_VARIABLES (0)
+// Number of bytes to align read/write data size for SDIO CMD53 in byte-mode.
+#ifndef CYW43_SDIO_CMD53_BYTE_MODE_DATA_ALIGN
+#define CYW43_SDIO_CMD53_BYTE_MODE_DATA_ALIGN (4)
 #endif
 
 // The following pins can be defined, depending on the configuration:
