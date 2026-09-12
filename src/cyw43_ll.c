@@ -1648,7 +1648,15 @@ alp_set:
     #if MICROPY_PY_NETWORK_CYW43_FW_LOADER
     cyw43_t *cyw_state = (cyw43_t *)self->cb_data;
 
-    if (cyw_state->wifi_fw_path != NULL) {
+    // Use runtime path if set, otherwise fall back to compile-time path
+    const char *wifi_fw_path = cyw_state->wifi_fw_path;
+    #if defined(MICROPY_PY_NETWORK_CYW43_WIFI_FW_PATH)
+    if (wifi_fw_path == NULL) {
+        wifi_fw_path = MICROPY_PY_NETWORK_CYW43_WIFI_FW_PATH;
+    }
+    #endif
+
+    if (wifi_fw_path != NULL) {
         // Filesystem firmware loader with dynamic buffers
         uint8_t *fw_verify_buf = m_new(uint8_t, CYW43_FW_VERIFY_TAIL_SIZE);
         uint8_t *block_buf = m_new(uint8_t, CYW43_BUS_MAX_BLOCK_SIZE);
@@ -1656,16 +1664,18 @@ alp_set:
         int ret;
 
         // Open WiFi firmware file via VFS
-        mp_obj_t fw_paths[1] = { mp_obj_new_str(cyw_state->wifi_fw_path, strlen(cyw_state->wifi_fw_path)) };
+        mp_obj_t fw_paths[1] = { mp_obj_new_str(wifi_fw_path, strlen(wifi_fw_path)) };
         mp_obj_t fw_file = mp_vfs_open(1, fw_paths, (mp_map_t *)&mp_const_empty_map);
 
         // Get firmware file size
         mp_off_t fw_len = mp_stream_seek(fw_file, 0, MP_SEEK_END, &err);
         if (err != 0) {
+            // File not found or other error - fall back to built-in firmware
             mp_stream_close(fw_file);
             m_del(uint8_t, block_buf, CYW43_BUS_MAX_BLOCK_SIZE);
             m_del(uint8_t, fw_verify_buf, CYW43_FW_VERIFY_TAIL_SIZE);
-            return -MP_ENOENT;
+            CYW43_DEBUG("cyw43_ll_wifi_init: firmware file not found, using built-in firmware\n");
+            goto use_builtin_fw;
         }
 
         // Read tail to prepare validation
@@ -1722,11 +1732,25 @@ alp_set:
             mp_obj_t nvram_paths[1] = { mp_obj_new_str(cyw_state->nvram_path, strlen(cyw_state->nvram_path)) };
             mp_obj_t nvram_file = mp_vfs_open(1, nvram_paths, (mp_map_t *)&mp_const_empty_map);
             mp_off_t nvram_size = mp_stream_seek(nvram_file, 0, MP_SEEK_END, &err);
-            mp_stream_seek(nvram_file, 0, MP_SEEK_SET, &err);
-            wifi_nvram_len = CYW43_WRITE_BYTES_PAD(nvram_size);
-            wifi_nvram_data = block_buf;
-            mp_stream_rw(nvram_file, (void *)block_buf, (mp_uint_t)nvram_size, &err, MP_STREAM_RW_READ);
-            mp_stream_close(nvram_file);
+            if (err == 0) {
+                mp_stream_seek(nvram_file, 0, MP_SEEK_SET, &err);
+                wifi_nvram_len = CYW43_WRITE_BYTES_PAD(nvram_size);
+                wifi_nvram_data = block_buf;
+                mp_stream_rw(nvram_file, (void *)block_buf, (mp_uint_t)nvram_size, &err, MP_STREAM_RW_READ);
+                if (err != 0) {
+                    CYW43_DEBUG("cyw43_ll_wifi_init: NVRAM file read error, using embedded\n");
+                    mp_stream_close(nvram_file);
+                    wifi_nvram_len = CYW43_WRITE_BYTES_PAD(sizeof(wifi_nvram_4343));
+                    wifi_nvram_data = wifi_nvram_4343;
+                } else {
+                    mp_stream_close(nvram_file);
+                }
+            } else {
+                CYW43_DEBUG("cyw43_ll_wifi_init: NVRAM file not found, using embedded\n");
+                mp_stream_close(nvram_file);
+                wifi_nvram_len = CYW43_WRITE_BYTES_PAD(sizeof(wifi_nvram_4343));
+                wifi_nvram_data = wifi_nvram_4343;
+            }
         } else {
             // Fallback to embedded NVRAM
             wifi_nvram_len = CYW43_WRITE_BYTES_PAD(sizeof(wifi_nvram_4343));
@@ -1741,6 +1765,7 @@ alp_set:
         m_del(uint8_t, fw_verify_buf, CYW43_FW_VERIFY_TAIL_SIZE);
     } else
     #endif
+    use_builtin_fw:
     {
         // Check that valid chipset firmware exists at the given source address.
         int ret = cyw43_check_valid_chipset_firmware(self, CYW43_WIFI_FW_LEN, fw_data);
@@ -1872,10 +1897,17 @@ f2_ready:
     // Load the CLM data; it sits just after main firmware
     CYW43_VDEBUG("cyw43_clm_load start\n");
     #if MICROPY_PY_NETWORK_CYW43_FW_LOADER
-    if (cyw_state->wifi_fw_path != NULL) {
+    // Use runtime path if set, otherwise fall back to compile-time path
+    const char *clm_fw_path = cyw_state->wifi_fw_path;
+    #if defined(MICROPY_PY_NETWORK_CYW43_WIFI_FW_PATH)
+    if (clm_fw_path == NULL) {
+        clm_fw_path = MICROPY_PY_NETWORK_CYW43_WIFI_FW_PATH;
+    }
+    #endif
+    if (clm_fw_path != NULL) {
         int err = 0;
         // Extract CLM from end of firmware file
-        mp_obj_t fw_paths[1] = { mp_obj_new_str(cyw_state->wifi_fw_path, strlen(cyw_state->wifi_fw_path)) };
+        mp_obj_t fw_paths[1] = { mp_obj_new_str(clm_fw_path, strlen(clm_fw_path)) };
         mp_obj_t fw_file = mp_vfs_open(1, fw_paths, (mp_map_t *)&mp_const_empty_map);
         mp_off_t fw_len = mp_stream_seek(fw_file, 0, MP_SEEK_END, &err);
         mp_off_t clm_start = ALIGN_UINT(fw_len, 512);

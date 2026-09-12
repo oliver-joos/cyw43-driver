@@ -106,6 +106,9 @@ void cyw43_init(cyw43_t *self) {
     self->ap_channel = 3;
     self->ap_ssid_len = 0;
     self->ap_key_len = 0;
+    self->wifi_fw_path = NULL;
+    self->nvram_path = NULL;
+    self->bt_fw_path = NULL;
 
     cyw43_poll = NULL;
     self->initted = true;
