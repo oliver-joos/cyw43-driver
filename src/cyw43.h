@@ -138,6 +138,13 @@ typedef struct _cyw43_t {
     #if CYW43_ENABLE_BLUETOOTH
     bool bt_loaded;
     #endif
+
+    // Firmware loader paths
+    #if defined(MICROPY_PY_NETWORK_CYW43_FW_LOADER) && MICROPY_PY_NETWORK_CYW43_FW_LOADER
+    const char *wifi_fw_path;
+    const char *nvram_path;
+    const char *bt_fw_path;
+    #endif
 } cyw43_t;
 
 extern cyw43_t cyw43_state;
