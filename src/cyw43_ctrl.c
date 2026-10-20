@@ -7,6 +7,7 @@
  */
 
 #include <assert.h>
+#include <inttypes.h>
 #include <string.h>
 
 #include "cyw43.h"
@@ -353,7 +354,7 @@ void cyw43_cb_process_async_event(void *cb_data, const cyw43_async_event_t *ev) 
             // No matching SSID found (could be out of range, or down)
         } else {
             // Other failure setting SSID
-            CYW43_DEBUG("link error status %d\n", ev->status);
+            CYW43_DEBUG("link error status %" PRIu32 "\n", ev->status);
             self->wifi_join_state = WIFI_JOIN_STATE_FAIL;
         }
     } else if (ev->event_type == CYW43_EV_AUTH) {
@@ -370,7 +371,7 @@ void cyw43_cb_process_async_event(void *cb_data, const cyw43_async_event_t *ev) 
             // Ignore it, lets keep trying
         } else {
             // Cannot authenticate
-            CYW43_DEBUG("auth error status %d\n", ev->status);
+            CYW43_DEBUG("auth error status %" PRIu32 "\n", ev->status);
             self->wifi_join_state = WIFI_JOIN_STATE_BADAUTH;
         }
     } else if (ev->event_type == CYW43_EV_DEAUTH_IND) {
@@ -403,7 +404,7 @@ void cyw43_cb_process_async_event(void *cb_data, const cyw43_async_event_t *ev) 
             cyw43_schedule_internal_poll_dispatch(cyw43_poll_func);
         } else {
             // PSK_SUP failure
-            CYW43_DEBUG("auth psk status %d\n", ev->status);
+            CYW43_DEBUG("auth psk status %" PRIu32 "\n", ev->status);
             self->wifi_join_state = WIFI_JOIN_STATE_BADAUTH;
         }
     } else if (ev->event_type == CYW43_EV_ICV_ERROR) {

@@ -401,7 +401,7 @@ static int cyw43_download_resource(cyw43_int_t *self, uint32_t addr, size_t len,
     // are aligned to a certain amount.
     assert(CYW43_WRITE_BYTES_PAD(len) == len);
 
-    CYW43_VDEBUG("writing %u bytes to 0x%x\n", (uint32_t)len, (uint32_t)addr);
+    CYW43_VDEBUG("writing %" PRIu32 " bytes to 0x%" PRIx32 "\n", (uint32_t)len, (uint32_t)addr);
 
     uint32_t block_size = CYW43_BUS_MAX_BLOCK_SIZE;
 
@@ -909,7 +909,7 @@ static int cyw43_send_ioctl(cyw43_int_t *self, uint32_t kind, uint32_t cmd, size
     memmove(self->spid_buf + SDPCM_HEADER_LEN + 16, buf, len);
 
     // do transfer
-    CYW43_VDEBUG("Sending cmd %s (%u) len %u flags %u status %u\n", ioctl_cmd_name(header->cmd), header->cmd, header->len, header->flags, header->status);
+    CYW43_VDEBUG("Sending cmd %s (%" PRIu32 ") len %" PRIu32 " flags %" PRIu32 " status %" PRIu32 "\n", ioctl_cmd_name(header->cmd), (uint32_t)header->cmd, (uint32_t)header->len, (uint32_t)header->flags, (uint32_t)header->status);
     if (header->cmd == WLC_SET_VAR || header->cmd == WLC_GET_VAR) {
         CYW43_VDEBUG("%s %s\n", ioctl_cmd_name(header->cmd), (const char *)buf);
     }
@@ -1507,7 +1507,7 @@ static void cyw43_clm_load(cyw43_int_t *self, const uint8_t *clm_ptr, size_t clm
         #pragma GCC diagnostic pop
         memcpy(buf + 20, clm_ptr + off, len);
 
-        CYW43_VDEBUG("clm data send %u/%u\n", off + len, clm_len);
+        CYW43_VDEBUG("clm data send %" PRIu32 "/%" PRIu32 "\n", (uint32_t)(off + len), (uint32_t)clm_len);
 
         // Send data aligned to 8 bytes; padding comes from junk at end of buf
         cyw43_do_ioctl(self, SDPCM_SET, WLC_SET_VAR, ALIGN_UINT(20 + len, 8), buf, WWD_STA_INTERFACE);
@@ -2207,7 +2207,7 @@ int cyw43_ll_wifi_join(cyw43_ll_t *self_in, size_t ssid_len, const uint8_t *ssid
         return -CYW43_EINVAL;
     }
 
-    CYW43_VDEBUG("Setting wsec=0x%x\n", auth_type & 0xff);
+    CYW43_VDEBUG("Setting wsec=0x%" PRIx32 "\n", (uint32_t)(auth_type & 0xff));
     cyw43_set_ioctl_u32(self, WLC_SET_WSEC, auth_type & 0xff, WWD_STA_INTERFACE);
 
     // supplicant variable
@@ -2251,7 +2251,7 @@ int cyw43_ll_wifi_join(cyw43_ll_t *self_in, size_t ssid_len, const uint8_t *ssid
     cyw43_write_iovar_u32(self, "mfp", (wpa_auth == CYW43_WPA2_AUTH_PSK || wpa_auth == CYW43_WPA3_AUTH_SAE_PSK) ? MFP_CAPABLE : MFP_NONE, WWD_STA_INTERFACE);
 
     // set WPA auth mode
-    CYW43_VDEBUG("Setting wpa auth 0x%x\n", wpa_auth);
+    CYW43_VDEBUG("Setting wpa auth 0x%" PRIx32 "\n", (uint32_t)wpa_auth);
     cyw43_set_ioctl_u32(self, WLC_SET_WPA_AUTH, wpa_auth, WWD_STA_INTERFACE);
 
     // allow relevant events through:
