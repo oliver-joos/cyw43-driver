@@ -1373,7 +1373,7 @@ static void device_core_is_up(cyw43_int_t *self, int core_id) {
         CYW43_WARN("core not up\n");
     }
     // if we get here then the core is up
-    CYW43_VDEBUG("core %d IS up\n", core_id);
+    CYW43_DEBUG("core %d IS up\n", core_id);
 }
 
 #if USE_KSO
@@ -1513,7 +1513,7 @@ static void cyw43_clm_load(cyw43_int_t *self, const uint8_t *clm_ptr, size_t clm
         cyw43_do_ioctl(self, SDPCM_SET, WLC_SET_VAR, ALIGN_UINT(20 + len, 8), buf, WWD_STA_INTERFACE);
     }
 
-    CYW43_VDEBUG("clm data send done\n");
+    CYW43_DEBUG("clm data send done\n");
     // Check the status of the download
     memcpy(buf, "clmload_status\x00\x00\x00\x00\x00", 19);
     cyw43_do_ioctl(self, SDPCM_GET, WLC_GET_VAR, 19, buf, WWD_STA_INTERFACE);
@@ -1523,7 +1523,7 @@ static void cyw43_clm_load(cyw43_int_t *self, const uint8_t *clm_ptr, size_t clm
         CYW43_WARN("CLM load failed\n");
     }
     #pragma GCC diagnostic pop
-    CYW43_VDEBUG("clm data load ok\n");
+    CYW43_DEBUG("clm data load ok\n");
 }
 
 static void cyw43_write_iovar_u32(cyw43_int_t *self, const char *var, uint32_t val, uint32_t iface) {
@@ -1660,7 +1660,7 @@ int cyw43_ll_bus_init(cyw43_ll_t *self_in, const uint8_t *mac) {
     return -CYW43_EIO;
 
 backplane_up:
-    CYW43_VDEBUG("backplane is up\n");
+    CYW43_DEBUG("backplane is up\n");
 
     // set the bus to 4-bits
     // (we don't need to change our local SDIO config until we need cmd53)
@@ -1705,7 +1705,7 @@ backplane_ready:
 
     #endif
 
-    CYW43_VDEBUG("backplane is ready\n");
+    CYW43_DEBUG("backplane is ready\n");
 
     // set the ALP
     #if !CYW43_USE_SPI
@@ -1734,7 +1734,7 @@ backplane_ready:
     return -CYW43_EIO;
 
 alp_set:
-    CYW43_VDEBUG("ALP is set\n");
+    CYW43_DEBUG("ALP is set\n");
 
     // clear request for ALP
     cyw43_write_reg_u8(self, BACKPLANE_FUNCTION, SDIO_CHIP_CLOCK_CSR, 0);
@@ -1891,9 +1891,9 @@ f2_ready:
     cyw43_ll_bus_sleep(self_in, false);
 
     // Load the CLM data; it sits just after main firmware
-    CYW43_VDEBUG("cyw43_clm_load start\n");
+    CYW43_DEBUG("cyw43_clm_load start\n");
     cyw43_clm_load(self, cyw43_chipset_clm_blob, sizeof(cyw43_chipset_clm_blob));
-    CYW43_VDEBUG("cyw43_clm_load done\n");
+    CYW43_DEBUG("cyw43_clm_load done\n");
 
     cyw43_write_iovar_u32(self, "bus:txglom", 0, WWD_STA_INTERFACE); // tx glomming off
     cyw43_write_iovar_u32(self, "apsta", 1, WWD_STA_INTERFACE); // apsta on
