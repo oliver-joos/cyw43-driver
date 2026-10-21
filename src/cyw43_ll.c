@@ -23,6 +23,14 @@
 #include CYW43_CHIPSET_FIRMWARE_INCLUDE_FILE
 #include CYW43_WIFI_NVRAM_INCLUDE_FILE
 
+#if MICROPY_PY_NETWORK_CYW43_FW_LOADER
+#include "extmod/vfs.h"
+#include "py/misc.h"
+#include "py/stream.h"
+
+#define CYW43_FW_VERIFY_TAIL_SIZE 800
+#endif
+
 #if CYW43_USE_SPI
 #include "cyw43_spi.h"
 #include "cyw43_debug_pins.h"
@@ -374,8 +382,8 @@ static void cyw43_write_backplane(cyw43_int_t *self, uint32_t addr, size_t size,
 
 static int cyw43_check_valid_chipset_firmware(cyw43_int_t *self, size_t len, const uint8_t *source) {
     (void)self;
-    // get the last bit of the firmware, the last 800 bytes
-    uint32_t fw_end = 800;
+    // get the last bit of the firmware
+    uint32_t fw_end = CYW43_FW_VERIFY_TAIL_SIZE;
     const uint8_t *b = source + len - fw_end;
 
     // get length of trailer
@@ -396,6 +404,52 @@ static int cyw43_check_valid_chipset_firmware(cyw43_int_t *self, size_t len, con
     CYW43_WARN("could not find valid firmware\n");
     return CYW43_FAIL_FAST_CHECK(-CYW43_EIO);
 }
+
+#if defined(MICROPY_PY_NETWORK_CYW43_FW_LOADER) && MICROPY_PY_NETWORK_CYW43_FW_LOADER
+static int cyw43_check_valid_chipset_file(cyw43_int_t *self, const char *file_path) {
+    CYW43_INFO("cyw43_check_valid_chipset_file(\"%s\")\n", file_path);
+
+    uint8_t *fw_verify_buf = m_new(uint8_t, CYW43_FW_VERIFY_TAIL_SIZE);
+    int ret = 0;
+    int err;
+
+    // Open WiFi firmware file via VFS
+    mp_obj_t fw_paths[2] = {
+        mp_obj_new_str(file_path, strlen(file_path)),
+        mp_obj_new_str("rb", 2),
+    };
+    mp_obj_t fw_file = mp_vfs_open(2, fw_paths, (mp_map_t *)&mp_const_empty_map);
+    if (fw_file == mp_const_none) {
+        ret = CYW43_FAIL_FAST_CHECK(-CYW43_ENOENT);
+        goto loader_end;
+    }
+
+    // Get firmware file size
+    mp_off_t fw_len = mp_stream_seek(fw_file, 0, MP_SEEK_END, &err);
+    if (err != 0) {
+        ret = CYW43_FAIL_FAST_CHECK(-CYW43_EIO);
+        goto loader_end;
+    }
+
+    CYW43_INFO("cyw43_check_valid_chipset_file(): fw_len=%d\n", fw_len);
+
+    // Read tail to prepare validation
+    mp_off_t tail_start = fw_len - CYW43_FW_VERIFY_TAIL_SIZE;
+    mp_stream_seek(fw_file, tail_start, MP_SEEK_SET, &err);
+    mp_uint_t actual = mp_stream_rw(fw_file, fw_verify_buf, CYW43_FW_VERIFY_TAIL_SIZE, &err, MP_STREAM_RW_READ);
+    if (actual != CYW43_FW_VERIFY_TAIL_SIZE || err != 0) {
+        ret = CYW43_FAIL_FAST_CHECK(-CYW43_EIO);
+        goto loader_end;
+    }
+
+    ret = cyw43_check_valid_chipset_firmware(self, CYW43_FW_VERIFY_TAIL_SIZE, fw_verify_buf);
+
+loader_end:
+    mp_stream_close(fw_file);
+    m_del(uint8_t, fw_verify_buf, CYW43_FW_VERIFY_TAIL_SIZE);
+    return ret;
+}
+#endif
 
 static int cyw43_download_resource(cyw43_int_t *self, uint32_t addr, size_t len, const uint8_t *source) {
     // The calls to cyw43_write_bytes() (and cyw43_read_bytes()) require data sizes that
@@ -476,6 +530,12 @@ static int cyw43_download_resource(cyw43_int_t *self, uint32_t addr, size_t len,
 
     return 0;
 }
+
+#if defined(MICROPY_PY_NETWORK_CYW43_FW_LOADER) && MICROPY_PY_NETWORK_CYW43_FW_LOADER
+static int cyw43_download_file(cyw43_int_t *self, uint32_t addr, const char *file_path) {
+    return -1;
+}
+#endif
 
 /*******************************************************************************/
 // Async event parsing
@@ -1768,15 +1828,30 @@ alp_set:
     cyw43_write_backplane(self, SOCSRAM_BANKX_PDA, 4, 0);
 
     // Check that valid chipset firmware exists at the given source address.
-    int ret = cyw43_check_valid_chipset_firmware(self, sizeof(cyw43_chipset_firmware_blob), cyw43_chipset_firmware_blob);
-    if (ret != 0) {
-        return ret;
+    int ret;
+    #if defined(MICROPY_PY_NETWORK_CYW43_FW_LOADER) && MICROPY_PY_NETWORK_CYW43_FW_LOADER
+    cyw43_t *cb_data = CYW_INT_FROM_LL(self)->cb_data;
+
+    ret = cyw43_check_valid_chipset_file(self, cb_data->wifi_fw_path);
+    if (ret != 0)
+    #endif
+    {
+        ret = cyw43_check_valid_chipset_firmware(self, sizeof(cyw43_chipset_firmware_blob), cyw43_chipset_firmware_blob);
+        if (ret != 0) {
+            return ret;
+        }
     }
 
     // Download the main WiFi firmware blob to the 43xx device.
-    ret = cyw43_download_resource(self, 0x00000000, CYW43_WRITE_BYTES_PAD(sizeof(cyw43_chipset_firmware_blob)), cyw43_chipset_firmware_blob);
-    if (ret != 0) {
-        return ret;
+    #if defined(MICROPY_PY_NETWORK_CYW43_FW_LOADER) && MICROPY_PY_NETWORK_CYW43_FW_LOADER
+    ret = cyw43_download_file(self, 0x00000000, cb_data->wifi_fw_path);
+    if (ret != 0)
+    #endif
+    {
+        ret = cyw43_download_resource(self, 0x00000000, CYW43_WRITE_BYTES_PAD(sizeof(cyw43_chipset_firmware_blob)), cyw43_chipset_firmware_blob);
+        if (ret != 0) {
+            return ret;
+        }
     }
 
     // Download the NVRAM to the 43xx device.
