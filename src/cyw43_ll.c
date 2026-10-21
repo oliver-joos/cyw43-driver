@@ -16,6 +16,7 @@
 #include "cyw43_country.h"
 #include "cyw43_ll.h"
 #include "cyw43_internal.h"
+#include "cyw43.h"
 #include "cyw43_stats.h"
 
 // Include the file containing the WiFi+CLM firmware blob as a C array.
@@ -1754,8 +1755,10 @@ alp_set:
     cyw43_read_reg_u8(self, BUS_FUNCTION, SDIOD_CCCR_IORDY);
     #endif
 
-    // START OF DOWNLOAD_FIRMWARE
+    // Read product ID from backplane after ALP is set but before firmware download
+    cyw43_ll_detect_chipset(self_in);
 
+    // START OF DOWNLOAD_FIRMWARE
     disable_device_core(self, CORE_WLAN_ARM, false);
     disable_device_core(self, CORE_SOCRAM, false);
     reset_device_core(self, CORE_SOCRAM, false);
@@ -1922,6 +1925,14 @@ f2_ready:
     }
 
     return 0;
+}
+
+uint16_t cyw43_ll_detect_chipset(cyw43_ll_t *self_in) {
+    // Product ID is at offset 0x0000 in CHIPCOMMON space
+    cyw43_int_t *self = CYW_INT_FROM_LL(self_in);
+    uint32_t prodid = cyw43_read_backplane(self, CHIPCOMMON_BASE_ADDRESS + 0x0000, sizeof(uint32_t));
+    CYW43_INFO("cyw43_ll_detect_chipset() -> prodid=%08x\n", prodid);
+    return (uint16_t)(prodid & 0xffff);
 }
 
 /*******************************************************************************/

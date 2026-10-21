@@ -301,6 +301,9 @@ int cyw43_ll_gpio_set(cyw43_ll_t *self, int gpio_n, bool gpio_en);
 int cyw43_ll_gpio_get(cyw43_ll_t *self_in, int gpio_n, bool *gpio_en);
 #endif
 
+// Runtime chipset detection
+uint16_t cyw43_ll_detect_chipset(cyw43_ll_t *self_in);
+
 // Get mac address
 int cyw43_ll_wifi_get_mac(cyw43_ll_t *self_in, uint8_t *addr);
 
