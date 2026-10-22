@@ -23,12 +23,12 @@
 #include CYW43_CHIPSET_FIRMWARE_INCLUDE_FILE
 #include CYW43_WIFI_NVRAM_INCLUDE_FILE
 
+#define CYW43_FW_VERIFY_TAIL_SIZE 800
+
 #if MICROPY_PY_NETWORK_CYW43_FW_LOADER
 #include "extmod/vfs.h"
 #include "py/misc.h"
 #include "py/stream.h"
-
-#define CYW43_FW_VERIFY_TAIL_SIZE 800
 #endif
 
 #if CYW43_USE_SPI
@@ -532,8 +532,68 @@ static int cyw43_download_resource(cyw43_int_t *self, uint32_t addr, size_t len,
 }
 
 #if defined(MICROPY_PY_NETWORK_CYW43_FW_LOADER) && MICROPY_PY_NETWORK_CYW43_FW_LOADER
+#define CYW43_DOWNLOAD_CHUNK_SIZE (4096)
+
 static int cyw43_download_file(cyw43_int_t *self, uint32_t addr, const char *file_path) {
-    return -1;
+    CYW43_INFO("cyw43_download_file(\"%s\") at 0x%" PRIx32 "\n", file_path, addr);
+
+    int ret = 0;
+    int err;
+    uint8_t *buf = NULL;
+
+    // Open WiFi firmware file via VFS
+    mp_obj_t fw_paths[2] = {
+        mp_obj_new_str(file_path, strlen(file_path)),
+        mp_obj_new_str("rb", 2),
+    };
+    mp_obj_t fw_file = mp_vfs_open(2, fw_paths, (mp_map_t *)&mp_const_empty_map);
+    if (fw_file == mp_const_none) {
+        CYW43_WARN("failed to open \"%s\"\n", file_path);
+        return CYW43_FAIL_FAST_CHECK(-CYW43_ENOENT);
+    }
+
+    // Get firmware file size
+    mp_off_t fw_len = mp_stream_seek(fw_file, 0, MP_SEEK_END, &err);
+    if (err != 0) {
+        CYW43_WARN("failed to get file size\n");
+        ret = CYW43_FAIL_FAST_CHECK(-CYW43_EIO);
+        goto download_end;
+    }
+
+    CYW43_INFO("cyw43_download_file(): fw_len=%d\n", (int)fw_len);
+
+    buf = m_new(uint8_t, CYW43_WRITE_BYTES_PAD(CYW43_DOWNLOAD_CHUNK_SIZE));
+
+    // Download file chunk by chunk
+    for (mp_off_t offset = 0; offset < fw_len; offset += CYW43_DOWNLOAD_CHUNK_SIZE) {
+        mp_stream_seek(fw_file, offset, MP_SEEK_SET, &err);
+        mp_uint_t actual = mp_stream_rw(fw_file, buf, CYW43_DOWNLOAD_CHUNK_SIZE, &err, MP_STREAM_RW_READ);
+        if (err != 0 || actual == 0) {
+            CYW43_WARN("failed to read chunk at offset %u\n", (unsigned int)offset);
+            ret = CYW43_FAIL_FAST_CHECK(-CYW43_EIO);
+            goto download_end;
+        }
+
+        size_t chunk_size = actual;
+        if (offset + chunk_size > fw_len) {
+            chunk_size = fw_len - offset;
+        }
+
+        size_t padded_size = CYW43_WRITE_BYTES_PAD(chunk_size);
+        ret = cyw43_download_resource(self, addr + offset, padded_size, buf);
+        if (ret != 0) {
+            CYW43_WARN("failed to download chunk at offset %u\n", (unsigned int)offset);
+            goto download_end;
+        }
+    }
+
+download_end:
+    mp_stream_close(fw_file);
+    if (buf != NULL) {
+        m_del(uint8_t, buf, CYW43_WRITE_BYTES_PAD(CYW43_DOWNLOAD_CHUNK_SIZE));
+    }
+    CYW43_INFO("cyw43_download_file(): done with result %d\n", ret);
+    return ret;
 }
 #endif
 
@@ -1856,8 +1916,14 @@ alp_set:
 
     // Download the NVRAM to the 43xx device.
     size_t wifi_nvram_len = CYW43_WRITE_BYTES_PAD(sizeof(wifi_nvram_4343));
-    const uint8_t *wifi_nvram_data = wifi_nvram_4343;
-    cyw43_download_resource(self, CYW43_RAM_SIZE - 4 - wifi_nvram_len, wifi_nvram_len, wifi_nvram_data);
+    #if defined(MICROPY_PY_NETWORK_CYW43_FW_LOADER) && MICROPY_PY_NETWORK_CYW43_FW_LOADER
+    ret = cyw43_download_file(self, CYW43_RAM_SIZE - 4 - sizeof(wifi_nvram_4343), cb_data->nvram_path);
+    if (ret != 0)
+    #endif
+    {
+        const uint8_t *wifi_nvram_data = wifi_nvram_4343;
+        cyw43_download_resource(self, CYW43_RAM_SIZE - 4 - wifi_nvram_len, wifi_nvram_len, wifi_nvram_data);
+    }
     uint32_t sz = ((~(wifi_nvram_len / 4) & 0xffff) << 16) | (wifi_nvram_len / 4);
     cyw43_write_backplane(self, CYW43_RAM_SIZE - 4, 4, sz);
 
