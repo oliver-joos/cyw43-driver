@@ -142,6 +142,7 @@ typedef struct _cyw43_t {
     // Firmware loader paths
     #if defined(MICROPY_PY_NETWORK_CYW43_FW_LOADER) && MICROPY_PY_NETWORK_CYW43_FW_LOADER
     const char *wifi_fw_path;
+    const char *clm_path;
     const char *nvram_path;
     const char *bt_fw_path;
     #endif
