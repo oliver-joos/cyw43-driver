@@ -595,6 +595,38 @@ download_end:
     CYW43_INFO("cyw43_download_file(): done with result %d\n", ret);
     return ret;
 }
+
+static int cyw43_read_file_into_buffer(const char *file_path, uint8_t **out_buf, size_t *out_len) {
+    int err;
+    mp_obj_t paths[2] = {
+        mp_obj_new_str(file_path, strlen(file_path)),
+        mp_obj_new_str("rb", 2),
+    };
+    mp_obj_t file = mp_vfs_open(2, paths, (mp_map_t *)&mp_const_empty_map);
+    if (file == mp_const_none) {
+        CYW43_WARN("failed to open \"%s\"\n", file_path);
+        return -CYW43_ENOENT;
+    }
+    mp_off_t len = mp_stream_seek(file, 0, MP_SEEK_END, &err);
+    if (err != 0 || len <= 0) {
+        CYW43_WARN("failed to get file size for \"%s\"\n", file_path);
+        mp_stream_close(file);
+        return -CYW43_EIO;
+    }
+    *out_len = (size_t)len;
+    *out_buf = m_new(uint8_t, *out_len);
+    mp_stream_seek(file, 0, MP_SEEK_SET, &err);
+    mp_uint_t actual = mp_stream_rw(file, *out_buf, *out_len, &err, MP_STREAM_RW_READ);
+    mp_stream_close(file);
+    if (err != 0 || (size_t)actual != *out_len) {
+        CYW43_WARN("failed to read \"%s\"\n", file_path);
+        m_del(uint8_t, *out_buf, *out_len);
+        *out_buf = NULL;
+        return -CYW43_EIO;
+    }
+    return 0;
+}
+
 #endif
 
 /*******************************************************************************/
@@ -2035,9 +2067,23 @@ f2_ready:
     cyw43_ll_bus_sleep(self_in, false);
 
     // Load the CLM data; it sits just after main firmware
-    CYW43_DEBUG("cyw43_clm_load start\n");
-    cyw43_clm_load(self, cyw43_chipset_clm_blob, sizeof(cyw43_chipset_clm_blob));
-    CYW43_DEBUG("cyw43_clm_load done\n");
+    CYW43_VDEBUG("cyw43_clm_load start\n");
+    #if defined(MICROPY_PY_NETWORK_CYW43_FW_LOADER) && MICROPY_PY_NETWORK_CYW43_FW_LOADER
+    if (cb_data->clm_path != NULL) {
+        CYW43_INFO("Loading CLM from file: %s\n", cb_data->clm_path);
+        uint8_t *clm_buf = NULL;
+        size_t clm_len = 0;
+        if (cyw43_read_file_into_buffer(cb_data->clm_path, &clm_buf, &clm_len) == 0) {
+            CYW43_INFO("CLM loaded from file: %d bytes\n", (int)clm_len);
+            cyw43_clm_load(self, clm_buf, clm_len);
+            m_del(uint8_t, clm_buf, clm_len);
+        }
+    } else
+    #endif
+    {
+        cyw43_clm_load(self, cyw43_chipset_clm_blob, sizeof(cyw43_chipset_clm_blob));
+    }
+    CYW43_VDEBUG("cyw43_clm_load done\n");
 
     cyw43_write_iovar_u32(self, "bus:txglom", 0, WWD_STA_INTERFACE); // tx glomming off
     cyw43_write_iovar_u32(self, "apsta", 1, WWD_STA_INTERFACE); // apsta on
