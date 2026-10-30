@@ -31,6 +31,7 @@
 #include "extmod/vfs.h"
 #include "py/misc.h"
 #include "py/stream.h"
+#include "py/nlr.h"
 #endif
 
 #if CYW43_USE_SPI
@@ -419,20 +420,25 @@ static int cyw43_check_valid_chipset_file(cyw43_int_t *self, const char *file_pa
     int err;
 
     // Open WiFi firmware file via VFS
-    mp_obj_t fw_paths[2] = {
-        mp_obj_new_str(file_path, strlen(file_path)),
-        mp_obj_new_str("rb", 2),
-    };
-    mp_obj_t fw_file = mp_vfs_open(2, fw_paths, (mp_map_t *)&mp_const_empty_map);
-    if (fw_file == mp_const_none) {
-        ret = CYW43_FAIL_FAST_CHECK(-CYW43_ENOENT);
-        goto loader_end;
+    mp_obj_t fw_file;
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        mp_obj_t fw_paths[2] = {
+            mp_obj_new_str(file_path, strlen(file_path)),
+            mp_obj_new_str("rb", 2),
+        };
+        fw_file = mp_vfs_open(2, fw_paths, (mp_map_t *)&mp_const_empty_map);
+        nlr_pop();
+    } else {
+        // Exception raised (e.g., file not found)
+        m_del(uint8_t, fw_verify_buf, CYW43_FW_VERIFY_TAIL_SIZE);
+        return -CYW43_ENOENT;
     }
 
     // Get firmware file size
     mp_off_t fw_len = mp_stream_seek(fw_file, 0, MP_SEEK_END, &err);
     if (err != 0) {
-        ret = CYW43_FAIL_FAST_CHECK(-CYW43_EIO);
+        ret = -CYW43_EIO;
         goto loader_end;
     }
 
@@ -443,7 +449,7 @@ static int cyw43_check_valid_chipset_file(cyw43_int_t *self, const char *file_pa
     mp_stream_seek(fw_file, tail_start, MP_SEEK_SET, &err);
     mp_uint_t actual = mp_stream_rw(fw_file, fw_verify_buf, CYW43_FW_VERIFY_TAIL_SIZE, &err, MP_STREAM_RW_READ);
     if (actual != CYW43_FW_VERIFY_TAIL_SIZE || err != 0) {
-        ret = CYW43_FAIL_FAST_CHECK(-CYW43_EIO);
+        ret = -CYW43_EIO;
         goto loader_end;
     }
 
@@ -550,13 +556,17 @@ static int cyw43_download_file(cyw43_int_t *self, uint32_t addr, const char *fil
     uint8_t *buf = NULL;
 
     // Open WiFi firmware file via VFS
-    mp_obj_t fw_paths[2] = {
-        mp_obj_new_str(file_path, strlen(file_path)),
-        mp_obj_new_str("rb", 2),
-    };
-    mp_obj_t fw_file = mp_vfs_open(2, fw_paths, (mp_map_t *)&mp_const_empty_map);
-    if (fw_file == mp_const_none) {
-        CYW43_WARN("failed to open \"%s\"\n", file_path);
+    mp_obj_t fw_file;
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        mp_obj_t fw_paths[2] = {
+            mp_obj_new_str(file_path, strlen(file_path)),
+            mp_obj_new_str("rb", 2),
+        };
+        fw_file = mp_vfs_open(2, fw_paths, (mp_map_t *)&mp_const_empty_map);
+        nlr_pop();
+    } else {
+        CYW43_WARN("failed to open \"%s\" (exception)\n", file_path);
         return CYW43_FAIL_FAST_CHECK(-CYW43_ENOENT);
     }
 
@@ -612,13 +622,17 @@ download_end:
 
 static int cyw43_read_file_into_buffer(const char *file_path, uint8_t **out_buf, size_t *out_len) {
     int err;
-    mp_obj_t paths[2] = {
-        mp_obj_new_str(file_path, strlen(file_path)),
-        mp_obj_new_str("rb", 2),
-    };
-    mp_obj_t file = mp_vfs_open(2, paths, (mp_map_t *)&mp_const_empty_map);
-    if (file == mp_const_none) {
-        CYW43_WARN("failed to open \"%s\"\n", file_path);
+    mp_obj_t file;
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        mp_obj_t paths[2] = {
+            mp_obj_new_str(file_path, strlen(file_path)),
+            mp_obj_new_str("rb", 2),
+        };
+        file = mp_vfs_open(2, paths, (mp_map_t *)&mp_const_empty_map);
+        nlr_pop();
+    } else {
+        CYW43_WARN("failed to open \"%s\" (exception)\n", file_path);
         return -CYW43_ENOENT;
     }
     mp_off_t len = mp_stream_seek(file, 0, MP_SEEK_END, &err);
@@ -1971,7 +1985,6 @@ alp_set:
     size_t wifi_nvram_len;
     #if defined(MICROPY_PY_NETWORK_CYW43_FW_LOADER) && MICROPY_PY_NETWORK_CYW43_FW_LOADER
     {
-        cyw43_t *cb_data = CYW_INT_FROM_LL(self)->cb_data;
         #if MICROPY_PY_NETWORK_CYW43_FW_INCLUDED
         wifi_nvram_len = CYW43_WRITE_BYTES_PAD(sizeof(wifi_nvram_4343));
         ret = cyw43_download_file(self, CYW43_RAM_SIZE - 4 - sizeof(wifi_nvram_4343), cb_data->nvram_path);
@@ -2115,7 +2128,6 @@ f2_ready:
     // Load the CLM data; it sits just after main firmware
     CYW43_VDEBUG("cyw43_clm_load start\n");
     #if defined(MICROPY_PY_NETWORK_CYW43_FW_LOADER) && MICROPY_PY_NETWORK_CYW43_FW_LOADER
-    cyw43_t *cb_data = CYW_INT_FROM_LL(self)->cb_data;
     if (cb_data->clm_path == NULL) {
         ret = -CYW43_ENOENT;
     } else {
