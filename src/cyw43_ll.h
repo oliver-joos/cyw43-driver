@@ -199,6 +199,26 @@
 #endif
 
 /*!
+ * \brief Chip common identity register, e.g. to detect if rev is 1DX or 1YN
+ *  31      28 27      24 23      20 19      16 15                         0
+ * +----------+----------+----------+----------+----------------------------+
+ * |   mem    |    cc    |   pkg    |   rev    |             id             |
+ * |   0x1    |   0x5    |   0x3    |   0x1    |          0xA9A6            |
+ * +----------+----------+----------+----------+----------------------------+
+ * type=memory type  cc=core count  pkg=package  rev=revision  id=chip ID
+ */
+typedef union {
+    uint32_t raw;
+    struct {
+        uint32_t id   : 16;  /* bits  0..15 */
+        uint32_t rev  :  4;  /* bits 16..19 */
+        uint32_t pkg  :  4;  /* bits 20..23 */
+        uint32_t cc   :  4;  /* bits 24..27 */
+        uint32_t type :  4;  /* bits 28..31 */
+    } bits;
+} cyw43_chipid_t;
+
+/*!
  * \brief To indicate no specific channel when calling cyw43_ll_wifi_join with bssid specified
  */
 #define CYW43_CHANNEL_NONE (0xffffffff) ///< No Channel specified (use the AP's channel)
@@ -302,7 +322,7 @@ int cyw43_ll_gpio_get(cyw43_ll_t *self_in, int gpio_n, bool *gpio_en);
 #endif
 
 // Runtime chipset detection
-uint16_t cyw43_ll_detect_chipset(cyw43_ll_t *self_in);
+uint32_t cyw43_ll_detect_chipid(cyw43_ll_t *self_in);
 
 // Get mac address
 int cyw43_ll_wifi_get_mac(cyw43_ll_t *self_in, uint8_t *addr);

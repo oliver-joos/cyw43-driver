@@ -1501,6 +1501,13 @@ int cyw43_ll_ioctl(cyw43_ll_t *self_in, uint32_t cmd, size_t len, uint8_t *buf, 
     return cyw43_do_ioctl(self, cmd & 1 ? SDPCM_SET : SDPCM_GET, cmd >> 1, len, buf, iface);
 }
 
+uint32_t cyw43_ll_detect_chipid(cyw43_ll_t *self_in) {
+    cyw43_int_t *self = CYW_INT_FROM_LL(self_in);
+    uint32_t chipid = cyw43_read_backplane(self, CHIPCOMMON_BASE_ADDRESS + 0x0000, sizeof(uint32_t));
+    CYW43_INFO("chipid=0x%08x\n", chipid);
+    return chipid;
+}
+
 /*******************************************************************************/
 // high-level stuff
 
@@ -1843,6 +1850,9 @@ int cyw43_ll_bus_init(cyw43_ll_t *self_in, const uint8_t *mac) {
 backplane_up:
     CYW43_DEBUG("backplane is up\n");
 
+    // Read product ID from backplane after ALP is set but before firmware download
+    cyw43_ll_detect_chipid(self_in);
+
     // set the bus to 4-bits
     // (we don't need to change our local SDIO config until we need cmd53)
     uint32_t reg = cyw43_read_reg_u8(self, BUS_FUNCTION, SDIOD_CCCR_BICTRL);
@@ -1934,9 +1944,6 @@ alp_set:
 
     cyw43_read_reg_u8(self, BUS_FUNCTION, SDIOD_CCCR_IORDY);
     #endif
-
-    // Read product ID from backplane after ALP is set but before firmware download
-    cyw43_ll_detect_chipset(self_in);
 
     // START OF DOWNLOAD_FIRMWARE
     disable_device_core(self, CORE_WLAN_ARM, false);
@@ -2186,14 +2193,6 @@ f2_ready:
     }
 
     return 0;
-}
-
-uint16_t cyw43_ll_detect_chipset(cyw43_ll_t *self_in) {
-    // Product ID is at offset 0x0000 in CHIPCOMMON space
-    cyw43_int_t *self = CYW_INT_FROM_LL(self_in);
-    uint32_t prodid = cyw43_read_backplane(self, CHIPCOMMON_BASE_ADDRESS + 0x0000, sizeof(uint32_t));
-    CYW43_INFO("cyw43_ll_detect_chipset() -> prodid=%08x\n", prodid);
-    return (uint16_t)(prodid & 0xffff);
 }
 
 /*******************************************************************************/
