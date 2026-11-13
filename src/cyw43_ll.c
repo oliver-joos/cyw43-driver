@@ -1667,7 +1667,7 @@ void cyw43_ll_bus_sleep(cyw43_ll_t *self_in, bool can_sleep) {
 #define CLM_CHUNK_LEN 1024 + 512
 #endif
 
-static void cyw43_clm_load(cyw43_int_t *self, const uint8_t *clm_ptr, size_t clm_len) {
+static int cyw43_clm_load(cyw43_int_t *self, const uint8_t *clm_ptr, size_t clm_len) {
     // Reuse spid_buf but be careful to start at the right offset in it
     uint8_t *buf = &self->spid_buf[SDPCM_HEADER_LEN + 16];
 
@@ -1709,9 +1709,11 @@ static void cyw43_clm_load(cyw43_int_t *self, const uint8_t *clm_ptr, size_t clm
     #pragma GCC diagnostic ignored "-Wcast-align"
     if (*(uint32_t *)buf != 0) {
         CYW43_WARN("CLM load failed\n");
+        return -CYW43_EIO;
     }
     #pragma GCC diagnostic pop
     CYW43_DEBUG("clm data load ok\n");
+    return 0;
 }
 
 static void cyw43_write_iovar_u32(cyw43_int_t *self, const char *var, uint32_t val, uint32_t iface) {
@@ -1955,73 +1957,62 @@ alp_set:
     cyw43_write_backplane(self, SOCSRAM_BANKX_PDA, 4, 0);
 
     // Check that valid chipset firmware exists at the given source address.
-    int ret;
+    int ret = -CYW43_EIO;
     #if defined(MICROPY_PY_NETWORK_CYW43_FW_LOADER) && MICROPY_PY_NETWORK_CYW43_FW_LOADER
-    cyw43_t *cb_data = CYW_INT_FROM_LL(self)->cb_data;
+    const cyw43_t *cb_data = CYW_INT_FROM_LL(self)->cb_data;
     ret = cyw43_check_valid_chipset_file(self, cb_data->wifi_fw_path);
     if (ret != 0)
     #endif
     {
-        #if MICROPY_PY_NETWORK_CYW43_FW_INCLUDED
+        #if defined(MICROPY_PY_NETWORK_CYW43_FW_INCLUDED) && MICROPY_PY_NETWORK_CYW43_FW_INCLUDED
         ret = cyw43_check_valid_chipset_firmware(self, sizeof(cyw43_chipset_firmware_blob), cyw43_chipset_firmware_blob);
-        if (ret != 0) {
+        if (ret != 0)
+        #endif
+        {
             return ret;
         }
-        #else
-        return ret;
-        #endif
     }
 
     // Download the main WiFi firmware blob to the 43xx device.
+    ret = -CYW43_EIO;
     #if defined(MICROPY_PY_NETWORK_CYW43_FW_LOADER) && MICROPY_PY_NETWORK_CYW43_FW_LOADER
     ret = cyw43_download_file(self, 0x00000000, cb_data->wifi_fw_path);
     if (ret != 0)
     #endif
     {
-        #if MICROPY_PY_NETWORK_CYW43_FW_INCLUDED
+        #if defined(MICROPY_PY_NETWORK_CYW43_FW_INCLUDED) && MICROPY_PY_NETWORK_CYW43_FW_INCLUDED
         ret = cyw43_download_resource(self, 0x00000000, CYW43_WRITE_BYTES_PAD(sizeof(cyw43_chipset_firmware_blob)), cyw43_chipset_firmware_blob);
-        if (ret != 0) {
+        if (ret != 0)
+        #endif
+        {
             return ret;
         }
-        #else
-        return ret;
-        #endif
     }
 
     // Download the NVRAM to the 43xx device.
-    size_t wifi_nvram_len;
+    size_t wifi_nvram_len = 0;
+    ret = -CYW43_EIO;
     #if defined(MICROPY_PY_NETWORK_CYW43_FW_LOADER) && MICROPY_PY_NETWORK_CYW43_FW_LOADER
-    {
-        #if MICROPY_PY_NETWORK_CYW43_FW_INCLUDED
-        wifi_nvram_len = CYW43_WRITE_BYTES_PAD(sizeof(wifi_nvram_4343));
-        ret = cyw43_download_file(self, CYW43_RAM_SIZE - 4 - sizeof(wifi_nvram_4343), cb_data->nvram_path);
-        if (ret != 0) {
-            const uint8_t *wifi_nvram_data = wifi_nvram_4343;
-            cyw43_download_resource(self, CYW43_RAM_SIZE - 4 - wifi_nvram_len, wifi_nvram_len, wifi_nvram_data);
-        }
-        #else
-        {
-            uint8_t *nvram_buf = NULL;
-            size_t nvram_size = 0;
-            ret = cyw43_read_file_into_buffer(cb_data->nvram_path, &nvram_buf, &nvram_size);
-            if (ret == 0) {
-                wifi_nvram_len = CYW43_WRITE_BYTES_PAD(nvram_size);
-                ret = cyw43_download_resource(self, CYW43_RAM_SIZE - 4 - nvram_size, wifi_nvram_len, nvram_buf);
-                m_del(uint8_t, nvram_buf, nvram_size);
-            }
-            if (ret != 0) {
-                return ret;
-            }
-        }
-        #endif
+    uint8_t *nvram_buf = NULL;
+    size_t nvram_size;
+    ret = cyw43_read_file_into_buffer(cb_data->nvram_path, &nvram_buf, &nvram_size);
+    if (ret == 0) {
+        wifi_nvram_len = CYW43_WRITE_BYTES_PAD(nvram_size);
+        ret = cyw43_download_resource(self, CYW43_RAM_SIZE - 4 - wifi_nvram_len, wifi_nvram_len, nvram_buf);
+        m_del(uint8_t, nvram_buf, nvram_size);
     }
-    #else
-    {
-        wifi_nvram_len = CYW43_WRITE_BYTES_PAD(sizeof(wifi_nvram_4343));
-        const uint8_t *wifi_nvram_data = wifi_nvram_4343;
-        cyw43_download_resource(self, CYW43_RAM_SIZE - 4 - wifi_nvram_len, wifi_nvram_len, wifi_nvram_data);
-    }
+    if (ret != 0)
     #endif
+    {
+        #if defined(MICROPY_PY_NETWORK_CYW43_FW_INCLUDED) && MICROPY_PY_NETWORK_CYW43_FW_INCLUDED
+        wifi_nvram_len = CYW43_WRITE_BYTES_PAD(sizeof(wifi_nvram_4343));
+        ret = cyw43_download_resource(self, CYW43_RAM_SIZE - 4 - wifi_nvram_len, wifi_nvram_len, wifi_nvram_4343);
+        if (ret != 0)
+        #endif
+        {
+            return ret;
+        }
+    }
     uint32_t sz = ((~(wifi_nvram_len / 4) & 0xffff) << 16) | (wifi_nvram_len / 4);
     cyw43_write_backplane(self, CYW43_RAM_SIZE - 4, 4, sz);
 
@@ -2134,36 +2125,27 @@ f2_ready:
 
     // Load the CLM data; it sits just after main firmware
     CYW43_VDEBUG("cyw43_clm_load start\n");
+    ret = -CYW43_EIO;
     #if defined(MICROPY_PY_NETWORK_CYW43_FW_LOADER) && MICROPY_PY_NETWORK_CYW43_FW_LOADER
-    if (cb_data->clm_path == NULL) {
-        ret = -CYW43_ENOENT;
-    } else {
-        uint8_t *clm_buf = NULL;
-        size_t clm_len = 0;
-        ret = cyw43_read_file_into_buffer(cb_data->clm_path, &clm_buf, &clm_len);
-        if (ret != 0) {
-            CYW43_INFO("CLM file load failed\n");
-        } else {
-            CYW43_INFO("CLM loaded from file: %d bytes\n", (int)clm_len);
-            cyw43_clm_load(self, clm_buf, clm_len);
-            m_del(uint8_t, clm_buf, clm_len);
+    uint8_t *clm_buf = NULL;
+    size_t clm_len = 0;
+    ret = cyw43_read_file_into_buffer(cb_data->clm_path, &clm_buf, &clm_len);
+    if (ret == 0) {
+        CYW43_INFO("CLM loaded from file: %d bytes\n", (int)clm_len);
+        ret = cyw43_clm_load(self, clm_buf, clm_len);
+        m_del(uint8_t, clm_buf, clm_len);
+    }
+    if (ret != 0)
+    #endif
+    {
+        #if defined(MICROPY_PY_NETWORK_CYW43_FW_INCLUDED) && MICROPY_PY_NETWORK_CYW43_FW_INCLUDED
+        ret = cyw43_clm_load(self, cyw43_chipset_clm_blob, sizeof(cyw43_chipset_clm_blob));
+        if (ret != 0)
+        #endif
+        {
+            return ret;
         }
     }
-    if (ret != 0) {
-        // No path set or file load failed, use embedded blob if available
-        #if MICROPY_PY_NETWORK_CYW43_FW_INCLUDED
-        cyw43_clm_load(self, cyw43_chipset_clm_blob, sizeof(cyw43_chipset_clm_blob));
-        #else
-        return -CYW43_ENOENT;
-        #endif
-    }
-    #elif defined(MICROPY_PY_NETWORK_CYW43_FW_INCLUDED) && MICROPY_PY_NETWORK_CYW43_FW_INCLUDED
-    // Only embedded mode, no loader
-    cyw43_clm_load(self, cyw43_chipset_clm_blob, sizeof(cyw43_chipset_clm_blob));
-    #else
-    // Neither loader nor embedded - error
-    return -CYW43_ENOENT;
-    #endif
     CYW43_VDEBUG("cyw43_clm_load done\n");
 
     cyw43_write_iovar_u32(self, "bus:txglom", 0, WWD_STA_INTERFACE); // tx glomming off
