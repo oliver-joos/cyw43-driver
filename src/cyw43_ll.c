@@ -27,7 +27,7 @@
 
 #define CYW43_FW_VERIFY_TAIL_SIZE 800
 
-#if MICROPY_PY_NETWORK_CYW43_FW_LOADER
+#if defined(MICROPY_PY_NETWORK_CYW43_FW_LOADER) && MICROPY_PY_NETWORK_CYW43_FW_LOADER
 #include "extmod/vfs.h"
 #include "py/misc.h"
 #include "py/stream.h"
@@ -549,7 +549,7 @@ static int cyw43_download_resource(cyw43_int_t *self, uint32_t addr, size_t len,
 #define CYW43_DOWNLOAD_CHUNK_SIZE (4096)
 
 static int cyw43_download_file(cyw43_int_t *self, uint32_t addr, const char *file_path) {
-    CYW43_INFO("cyw43_download_file(\"%s\") at 0x%" PRIx32 "\n", file_path, addr);
+    CYW43_INFO("cyw43_download_file(\"%s\") to 0x%" PRIx32 "\n", file_path, addr);
 
     int ret = 0;
     int err;
@@ -621,6 +621,13 @@ download_end:
 }
 
 static int cyw43_read_file_into_buffer(const char *file_path, uint8_t **out_buf, size_t *out_len) {
+    if (file_path == NULL) {
+        CYW43_INFO("cyw43_read_file_into_buffer(NULL) => skipped\n");
+        return -CYW43_EIO;
+    } else {
+        CYW43_INFO("cyw43_read_file_into_buffer(\"%s\")\n", file_path);
+    }
+
     int err;
     mp_obj_t file;
     nlr_buf_t nlr;
@@ -1667,6 +1674,8 @@ void cyw43_ll_bus_sleep(cyw43_ll_t *self_in, bool can_sleep) {
 #define CLM_CHUNK_LEN 1024 + 512
 #endif
 
+#if (defined(MICROPY_PY_NETWORK_CYW43_FW_INCLUDED) && MICROPY_PY_NETWORK_CYW43_FW_INCLUDED) || \
+    (defined(MICROPY_PY_NETWORK_CYW43_FW_LOADER) && MICROPY_PY_NETWORK_CYW43_FW_LOADER)
 static int cyw43_clm_load(cyw43_int_t *self, const uint8_t *clm_ptr, size_t clm_len) {
     // Reuse spid_buf but be careful to start at the right offset in it
     uint8_t *buf = &self->spid_buf[SDPCM_HEADER_LEN + 16];
@@ -1715,6 +1724,7 @@ static int cyw43_clm_load(cyw43_int_t *self, const uint8_t *clm_ptr, size_t clm_
     CYW43_DEBUG("clm data load ok\n");
     return 0;
 }
+#endif
 
 static void cyw43_write_iovar_u32(cyw43_int_t *self, const char *var, uint32_t val, uint32_t iface) {
     uint8_t *buf = &self->spid_buf[SDPCM_HEADER_LEN + 16];
